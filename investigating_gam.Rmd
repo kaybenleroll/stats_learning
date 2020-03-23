@@ -1,0 +1,146 @@
+---
+title: "Investigating the Use of Generalised Additive Models"
+author: "Mick Cooney <mickcooney@gmail.com>"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_caption: yes
+    theme: spacelab #sandstone #spacelab #flatly
+    highlight: pygments
+    number_sections: TRUE
+    toc: TRUE
+    toc_depth: 2
+    toc_float:
+      smooth_scroll: FALSE
+  pdf_document: default
+---
+
+
+```{r knit_opts, include=FALSE}
+library(conflicted)
+library(tidyverse)
+library(magrittr)
+library(rlang)
+library(scales)
+library(purrr)
+library(forcats)
+library(vctrs)
+library(cowplot)
+library(mgcv)
+library(broom)
+library(CASdatasets)
+
+
+#source("custom_functions.R")
+
+conflict_prefer("filter",          "dplyr")
+conflict_prefer("select",          "dplyr")
+conflict_prefer("lag",             "dplyr")
+
+
+
+knitr::opts_chunk$set(tidy       = FALSE,
+                      cache      = FALSE,
+                      message    = FALSE,
+                      warning    = FALSE,
+                      fig.height =     8,
+                      fig.width  =    11)
+
+
+
+options(width = 80L,
+        warn  = 1,
+        mc.cores = parallel::detectCores()
+        )
+
+theme_set(theme_cowplot())
+
+
+stan_seed <- 42
+set.seed(42)
+```
+
+
+# Load `rock` Data
+
+First we need to load the various datasets we are using in our model.
+
+```{r load_datasets, echo=TRUE}
+data(rock)
+
+rock %>% glimpse()
+```
+
+In our models, we are trying to predict the value for permeability, `perm`
+based on the other measures.
+
+
+## Scatterplots for Variables
+
+We want to build quick scatterplots for each of the three input variables
+against `perm`.
+
+```{r construct_scatterplots, echo=TRUE}
+plot_tbl <- rock %>%
+  gather('input', 'value', -perm)
+
+ggplot(plot_tbl) +
+  geom_point(aes(x = value, y = perm)) +
+  facet_wrap(vars(input), scales = "free", ncol = 2) +
+  xlab("Input Value") +
+  ylab("Permeability")
+```
+
+We also want to repeat this plot against the log of the permeability.
+
+```{r}
+plot_tbl <- rock %>%
+  gather('input', 'value', -perm) %>%
+  mutate(log_perm = log(perm))
+
+ggplot(plot_tbl) +
+  geom_point(aes(x = value, y = log_perm)) +
+  facet_wrap(vars(input), scales = "free", ncol = 2) +
+  xlab("Input Value") +
+  ylab("Log of Permeability")
+```
+
+
+# Fit Regression Models
+
+We start by fitting a basic linear model first, fitting to `log_perm`.
+
+
+```{r fit_linear_model, echo=TRUE}
+rock_lm <- lm(log(perm) ~ area + peri + shape, data = rock)
+
+rock_lm %>% glance()
+```
+
+
+
+```{r fit_gam_model, echo=TRUE}
+rock_gam <- gam(log(perm) ~ s(area) + s(peri) + s(shape), 
+                data = rock,
+                control = gam.control(maxit = 50)
+                )
+
+rock_gam %>% summary()
+rock_gam %>% glance()
+```
+
+
+```{r compare_models_anova, echo=TRUE}
+anova(rock_lm, rock_gam)
+```
+
+```{r plot_different_models, echo=TRUE}
+par(mfrow = c(2, 3), pty = "s")
+plot(rock_gam, se = T)
+
+rock_gam1 <- gam(log(perm) ~ area + peri + s(shape), data = rock)
+plot(rock_gam1, se = T)
+
+
+anova(rock_lm, rock_gam1, rock_gam)
+```
